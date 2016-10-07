@@ -354,9 +354,59 @@ export function updateDimensions(nodes: VirtualNode[], cells: VirtualCell[], dat
   }
 
   // figure out which cells are currently viewable within the viewport
-  let viewableBottom = (data.scrollTop + data.viewHeight);
+  let viewableBottom = data.scrollTop + data.viewHeight;
   data.topViewCell = totalCells;
   data.bottomViewCell = 0;
+
+  // ideally, we have equal buffer on top and on bottom
+  let bufferHeight = data.renderHeight - data.viewHeight;
+
+  let smallPortionOfBuffer = bufferHeight / 4; // 1/4 of buffer
+  let largePortionOfBuffer = bufferHeight - smallPortionOfBuffer; // 3/4 of buffer
+
+  let bufferedTop: number;
+  let bufferedBottom: number;
+
+  if ( data.scrollDiff > 0 ) {
+    // scrolling down - we want most (x/y ideal) of buffer on the bottom
+    if  ( data.scrollTop - smallPortionOfBuffer < 0 ) {
+      // the entire small section of the buffer can't fit on the top
+      let overflow = Math.abs(data.scrollTop - smallPortionOfBuffer);
+      bufferedTop = 0;
+      bufferedBottom = viewableBottom + largePortionOfBuffer + overflow;
+    } else {
+      bufferedTop = data.scrollTop - smallPortionOfBuffer;
+      bufferedBottom = data.scrollTop + data.viewHeight + largePortionOfBuffer;
+    }
+  }
+  else if ( data.scrollDiff < 0 ) {
+    // scrolling up - we want most (x/y ideal) of buffer on the top
+    if  ( data.scrollTop - largePortionOfBuffer < 0 ) {
+      // the entire large section of the buffer can't fit on the top
+      let overflow = Math.abs(data.scrollTop - largePortionOfBuffer);
+      bufferedTop = 0;
+      bufferedBottom = viewableBottom + smallPortionOfBuffer + overflow;
+    } else {
+      bufferedTop = data.scrollTop - largePortionOfBuffer;
+      bufferedBottom = data.scrollTop + data.viewHeight + smallPortionOfBuffer;
+    }
+  } else {
+    // scrollDiff is 0 - so evenly divide the buffer if possible
+    let halfBuffer = bufferHeight / 2;
+    if  ( data.scrollTop - halfBuffer < 0 ) {
+      // the entire small section of the buffer can't fit on the top
+      let overflow = Math.abs(data.scrollTop - halfBuffer);
+      bufferedTop = 0;
+      bufferedBottom = viewableBottom + halfBuffer + overflow;
+    } else {
+      bufferedTop = data.scrollTop - halfBuffer;
+      bufferedBottom = data.scrollTop + data.viewHeight + halfBuffer;
+    }
+  }
+
+  // normalize the data, just in case
+  bufferedTop = Math.max(0, bufferedTop);
+  // TODO, we probably could normalize bufferedBottom to the bottom of the virtual container (estimateHeight method)
 
   // completely realign position to ensure they're all accurately placed
   for (var i = 1; i < totalCells; i++) {
@@ -377,10 +427,10 @@ export function updateDimensions(nodes: VirtualNode[], cells: VirtualCell[], dat
     }
 
     // figure out which cells are viewable within the viewport
-    if (cell.top + cell.height > data.scrollTop && i < data.topViewCell) {
+    if (cell.top + cell.height > bufferedTop && i < data.topViewCell) {
       data.topViewCell = i;
 
-    } else if (cell.top < viewableBottom && i > data.bottomViewCell) {
+    } else if (cell.top < bufferedBottom && i > data.bottomViewCell) {
       data.bottomViewCell = i;
     }
   }
@@ -428,7 +478,7 @@ export function writeToNodes(nodes: VirtualNode[], cells: VirtualCell[], totalRe
 
         if (element) {
           // ******** DOM WRITE ****************
-          element.style[CSS.transform] = node.lastTransform = transform;
+          (<any>element.style)[CSS.transform] = node.lastTransform = transform;
 
           // ******** DOM WRITE ****************
           element.classList.add('virtual-position');
@@ -457,58 +507,16 @@ export function writeToNodes(nodes: VirtualNode[], cells: VirtualCell[], totalRe
  * NO DOM
  */
 export function adjustRendered(cells: VirtualCell[], data: VirtualData) {
-  // figure out which cells should be rendered
-  let cell: VirtualCell;
-  let lastRow = -1;
-  let cellsRenderHeight = 0;
-  let maxRenderHeight = (data.renderHeight - data.itmHeight);
-  let totalCells = cells.length;
   let viewableRenderedPadding = (data.itmHeight < 90 ? VIEWABLE_RENDERED_PADDING : 0);
-
   if (data.scrollDiff > 0) {
     // scrolling down
     data.topCell = Math.max(data.topViewCell - viewableRenderedPadding, 0);
-    data.bottomCell = Math.min(data.topCell + 2, totalCells - 1);
-
-    for (var i = data.topCell; i < totalCells; i++) {
-      cell = cells[i];
-      if (cell.row !== lastRow) {
-        cellsRenderHeight += cell.height;
-        lastRow = cell.row;
-      }
-
-      if (i > data.bottomCell) {
-        data.bottomCell = i;
-      }
-
-      if (cellsRenderHeight >= maxRenderHeight) {
-        break;
-      }
-    }
-
+    data.bottomCell = Math.max(data.topCell + 2, data.bottomViewCell);
   } else {
     // scroll up
-    data.bottomCell = Math.min(data.bottomViewCell + viewableRenderedPadding, totalCells - 1);
-    data.topCell = Math.max(data.bottomCell - 2, 0);
-
-    for (var i = data.bottomCell; i >= 0; i--) {
-      cell = cells[i];
-      if (cell.row !== lastRow) {
-        cellsRenderHeight += cell.height;
-        lastRow = cell.row;
-      }
-
-      if (i < data.topCell) {
-        data.topCell = i;
-      }
-
-      if (cellsRenderHeight >= maxRenderHeight) {
-        break;
-      }
-    }
+    data.bottomCell = Math.min(data.bottomViewCell + viewableRenderedPadding, cells.length - 1);
+    data.topCell = Math.min(data.bottomCell - 2, data.topViewCell);
   }
-
-  // console.log(`adjustRendered topCell: ${data.topCell}, bottomCell: ${data.bottomCell}, cellsRenderHeight: ${cellsRenderHeight}, data.renderHeight: ${data.renderHeight}`);
 }
 
 
@@ -667,6 +675,8 @@ export interface VirtualData {
   bottomCell?: number;
   topViewCell?: number;
   bottomViewCell?: number;
+  bufferedTop?: number;
+  bufferedBottom?: number;
   valid?: boolean;
   itmWidth?: number;
   itmHeight?: number;

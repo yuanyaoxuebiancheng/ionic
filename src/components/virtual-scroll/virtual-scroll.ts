@@ -115,7 +115,7 @@ import { VirtualFooter, VirtualHeader, VirtualItem } from './virtual-item';
  * makes a HTTP request for the image file. HTTP requests, image
  * decoding, and image rendering can cause issues while scrolling. For virtual
  * scrolling, the natural effects of the `<img>` are not desirable features.
- * 
+ *
  * Note: `<ion-img>` should only be used with Virtual Scroll. If you are using
  * an image outside of Virtual Scroll you should use the standard `<img>` tag.
  *
@@ -342,7 +342,8 @@ export class VirtualScroll implements DoCheck, AfterContentInit, OnDestroy {
       this.update(true);
 
       this._platform.onResize(() => {
-        console.debug('VirtualScroll, onResize');
+        // invalidate dimensions so we account for new width
+        this._data.valid = false;
         this.update(false);
       });
     }
@@ -490,11 +491,10 @@ export class VirtualScroll implements DoCheck, AfterContentInit, OnDestroy {
       this._queue = null;
 
     } else {
-
       data.scrollDiff = (data.scrollTop - this._lastCheck);
 
       if (Math.abs(data.scrollDiff) > SCROLL_DIFFERENCE_MINIMUM) {
-        // don't bother updating if the scrollTop hasn't changed much
+        // don't bother updating if the scrollDiff hasn't changed much
         this._lastCheck = data.scrollTop;
 
         if (data.scrollDiff > 0) {
@@ -545,6 +545,9 @@ export class VirtualScroll implements DoCheck, AfterContentInit, OnDestroy {
       img.enable(true);
     });
 
+    // mark scroll diff as 0 since we're done scrolling
+    this._data.scrollDiff = 0;
+
     // ******** DOM READ ****************
     updateDimensions(this._nodes, this._cells, this._data, false);
 
@@ -553,10 +556,29 @@ export class VirtualScroll implements DoCheck, AfterContentInit, OnDestroy {
     // ******** DOM WRITE ****************
     this._cd.detectChanges();
 
+    let stopAtHeight = (this._data.scrollTop + this._data.renderHeight);
+
+    processRecords(stopAtHeight, this._records, this._cells,
+                    this._hdrFn, this._ftrFn, this._data);
+
+
+    let madeChanges = populateNodeData(this._data.topCell, this._data.bottomCell,
+              this._data.viewWidth, false,
+              this._cells, this._records, this._nodes,
+              this._itmTmp.viewContainer,
+              this._itmTmp.templateRef,
+              this._hdrTmp && this._hdrTmp.templateRef,
+              this._ftrTmp && this._ftrTmp.templateRef, false);
+
+    // ******** DOM WRITE ****************
+    writeToNodes(this._nodes, this._cells, this._records.length);
+
     // ******** DOM WRITE ****************
     this.setVirtualHeight(
       estimateHeight(this._records.length, this._cells[this._cells.length - 1], this._vHeight, 0.05)
     );
+
+
   }
 
   /**
